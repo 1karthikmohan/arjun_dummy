@@ -8,6 +8,7 @@ import { MapPinIcon, ExclamationTriangleIcon, ArrowPathIcon, ChevronLeftIcon } f
 import { supabase } from '../lib/supabase';
 import { transformProfileToUser } from '../../lib/utils';
 import { getUserPosts } from '../lib/posts';
+import { isDemoUser, DEMO_VISIBLE_USER_IDS } from '../utils/demo';
 import { 
   getNearbyUsers, 
   checkLocationPermission,
@@ -38,6 +39,7 @@ export const RadarScreen: React.FC<Props> = ({
   });
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [isRequestingLocation, setIsRequestingLocation] = useState(false);
+  const isDemo = isDemoUser(currentUser?.email);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   
@@ -53,6 +55,22 @@ export const RadarScreen: React.FC<Props> = ({
 
   // Refs for cleanup
   const mountedRef = useRef(true);
+
+  const loadDemoUsers = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .in('id', DEMO_VISIBLE_USER_IDS);
+
+    if (error) {
+      console.error('Failed to load demo users:', error);
+      setUsers([]);
+      return;
+    }
+
+    const transformed = (data || []).map(transformProfileToUser);
+    setUsers(transformed);
+  }, []);
 
   // Load users with exact coordinate match
   const loadNearbyUsers = useCallback(async (currentUserId: string, location: UserLocation) => {
@@ -106,6 +124,14 @@ export const RadarScreen: React.FC<Props> = ({
   const initializeRadar = useCallback(async () => {
     try {
       console.log('🚀 RADAR DEBUG: Initializing radar screen');
+
+      if (isDemo) {
+        setIsLocationEnabled(false);
+        await loadDemoUsers();
+        setCurrentLocation(null);
+        setIsLoading(false);
+        return;
+      }
       
       if (!currentUser) {
         console.error('🚀 RADAR DEBUG: No current user provided');
@@ -338,7 +364,16 @@ export const RadarScreen: React.FC<Props> = ({
 
   // Pull to refresh handler
   const handleRefresh = async () => {
-    if (isRefreshing || !currentUser || !isLocationEnabled) return;
+    if (isRefreshing || !currentUser) return;
+
+    if (isDemo) {
+      setIsRefreshing(true);
+      await loadDemoUsers();
+      setIsRefreshing(false);
+      return;
+    }
+
+    if (!isLocationEnabled) return;
     
     setIsRefreshing(true);
     setLocationError(null);
